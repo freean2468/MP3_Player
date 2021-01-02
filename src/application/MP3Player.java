@@ -19,43 +19,60 @@ import org.tritonus.share.sampled.file.TAudioFileFormat;
 
 import javazoom.spi.mpeg.sampled.convert.DecodedMpegAudioInputStream;
 
+// Singleton
 public class MP3Player {
-// 각 mp3 chunk header 안에 현재 포지션(in ms, and bytes)이 기억되어 있다. 
-// {mp3.frame.bitrate=320000, mp3.frame.size.bytes=1041, mp3.position.microseconds=15490612, mp3.position.byte=617252, mp3.frame=593, mp3.equalizer=[F@6a79c292}
-//	duration : [Long], duration in microseconds. 
-//	- mp3.channels : [Integer], number of channels 1 : mono, 2 : stereo. 
-//	 - mp3.length.bytes : [Integer], length in bytes. 
+	private static MP3Player singleton = new MP3Player();
 	
-	// 한 프레임(mp3 chunk) 길이. 이만큼 bytes로 읽자.
-//	 - mp3.length.frames : [Integer], length in frames. 				
-//	 - mp3.framesize.bytes : [Integer], framesize of the first frame. 
-//     framesize is not constant for VBR streams. 
-//	 - mp3.framerate.fps : [Float], framerate in frames per seconds. 
+// 각 mp3 chunk header 안에 현재 포지션(in ms, and bytes)이 기억되어 있다. 
+//{ 
+//	mp3.frame.size.bytes=1041, 			// 한 프레임 길이. 버퍼에 읽고 쓸 bytes 길이.
+//	mp3.position.microseconds=15490612, // 현재 위치 (micro seconds 기준)
+//	mp3.position.byte=617252, 			// 현재 위치 (bytes 기준) 
+//	mp3.frame=593						// 현재 프레임 
+//}
+	
+//	- duration : [Long], duration in microseconds. 
+//	- mp3.channels : [Integer], number of channels 1 : mono, 2 : stereo. 
+//	- mp3.length.bytes : [Integer], length in bytes. 
+//	- mp3.length.frames : [Integer], length in frames. // 총 프레임(mp3 chunk) 길이. 				
+//	- mp3.framesize.bytes : [Integer], framesize of the first frame. framesize is not constant for VBR streams. 
+//	- mp3.framerate.fps : [Float], framerate in frames per seconds. 
 	private Map<String, Object> properties;
 	private int currentSeconds;
 	private long currentBytes;
-	private Play play;
+
+	private Thread thread; 				// 음악 재생용 쓰레드
+	private File file;					// 선택된 mp3 파일 
+	private AudioInputStream in;		// 선택된 mp3 파일의 디코딩 전 원본 스트림 
 	
-	public MP3Player (String fileName) {
+	private boolean isRunning;
+	
+	private MP3Player () {
 		properties = new HashMap<String, Object>();
 		currentSeconds = 0;
 		currentBytes = 0;
-		play = new Play(fileName);
-		(new Thread(play)).start();
+		isRunning = true;
 	}
 	
-	// 음악 재생용 쓰레드 
-	private class Play implements Runnable {
-		private String fileName;
-		
-		public Play(String fileName) {
-			this.fileName = fileName;
-		}
-		
-		public void run() {
+	public void toggle() {
+		if (isRunning == false) {
 			try {
-				File file = new File(fileName);
-				AudioInputStream in = AudioSystem.getAudioInputStream(file);
+				synchronized(thread) {
+					System.out.println(Thread.currentThread().getName() + " calling thread.notify");
+					thread.notify();
+				}
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
+		isRunning = !isRunning;
+	}
+	
+	public void play(String fileName) {
+		thread = new Thread(() -> {
+			try {
+				file = new File(fileName);
+				in = AudioSystem.getAudioInputStream(file);
 				AudioInputStream din = null;
 				AudioFormat baseFormat = in.getFormat();
 				AudioFormat decodedFormat = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED,
@@ -67,22 +84,25 @@ public class MP3Player {
 															false);
 				setProperties(file);
 				din = AudioSystem.getAudioInputStream(decodedFormat, in);
-				// play now
+				// blocking method
 				rawplay(decodedFormat, din);
+				System.out.println("play try call before in.close()");
 				in.close();
 			} catch (Exception e) {
 				System.out.println(e.getMessage());
 				e.printStackTrace();
+			} finally {
+				System.out.println("play finally call");
 			}
-		}
+		});
 		
-		public void setFileName(String fileName) {
-			this.fileName = fileName;
-		}
+		thread.start();
+//		thread.setName("mp3 play thread");
+		System.out.println(thread.getName());
 	}
 	
-	private void rawplay(AudioFormat targetFormat, AudioInputStream din) throws IOException, LineUnavailableException {
-		byte[] data = new byte[(Integer)properties.get("mp3.length.frames")];
+	private synchronized void rawplay(AudioFormat targetFormat, AudioInputStream din) throws IOException, LineUnavailableException {
+		byte[] data = new byte[(Integer)properties.get("mp3.framesize.bytes")];
 		SourceDataLine line = getLine(targetFormat);
 		int sum = 0;
 		// blocking
@@ -91,11 +111,28 @@ public class MP3Player {
 			line.start();
 			int nBytesRead = 0, nBytesWritten = 0;
 			while (nBytesRead != -1) {
+				while (!isRunning) {
+					try {
+						synchronized (thread) {
+							System.out.println(thread.getName() + " calling thread.wait!");
+							// Thread의 wait 함수는 불리는 개체에 상관 없이 '현재' 스레드를 중지시킨다.
+							// 즉 wait() 함수는 작업이 중지될 그 지점에서 호출되어야지,
+							// 다른 thread로부터 불릴 수는 없다.
+							thread.wait();
+						}
+					} catch (InterruptedException e) {
+						Thread.currentThread().interrupt(); 
+		                System.out.println("Thread interrupted"); 
+					} catch (Exception e) {
+						System.out.println(thread.getName());
+						e.printStackTrace();
+					}
+				}
 				nBytesRead = din.read(data, 0, data.length);
 				
 				if (din instanceof DecodedMpegAudioInputStream) {
 					Map<String, Object> property = ((DecodedMpegAudioInputStream) din).properties();
-					System.out.println(property);
+//					System.out.println(property);
 					setCurrentSeconds(getCurrentSeconds((Long)property.get("mp3.position.microseconds")));
 					setCurrentBytes((Long)property.get("mp3.position.byte"));
 				}
@@ -126,18 +163,18 @@ public class MP3Player {
 		AudioFormat baseFormat = baseFileFormat.getFormat();
 		
 		if (baseFileFormat instanceof TAudioFileFormat) {
-			System.out.println("TAudioFileFormat");
+//			System.out.println("TAudioFileFormat");
 			Map<String, Object> properties = ((TAudioFileFormat)baseFileFormat).properties();
-			System.out.println(properties);
+//			System.out.println(properties);
 			this.properties.putAll(properties);
 		}
 		
 		if (baseFormat instanceof TAudioFormat) {
-			System.out.println("TAudioFormat");
+//			System.out.println("TAudioFormat");
 //			this.properties.putAll(((TAudioFormat)baseFormat).properties());
 		}
 		
-		System.out.println(this.properties);
+//		System.out.println(this.properties);
 	}
 	
 	public int getCurrentSeconds(long microSeconds) {
@@ -154,5 +191,9 @@ public class MP3Player {
 	
 	private void setCurrentBytes(long bytes) {
 		currentBytes = bytes;
+	}
+	
+	public static MP3Player getInstance() {
+		return singleton;
 	}
 }
