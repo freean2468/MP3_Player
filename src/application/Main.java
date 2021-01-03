@@ -23,7 +23,7 @@ public class Main extends Application {
 			primaryStage.setScene(scene);
 			primaryStage.show();
 			
-//			System.out.println(Thread.currentThread().getName());
+			System.out.println(Thread.currentThread().getName());
 		} catch(Exception e) {
 			e.printStackTrace();
 		}
@@ -36,7 +36,7 @@ public class Main extends Application {
 	}
 	
 	public static void main(String[] args) {
-//		System.out.println(Thread.currentThread().getName());
+		System.out.println(Thread.currentThread().getName());
 		launch(args);
 	}
 }

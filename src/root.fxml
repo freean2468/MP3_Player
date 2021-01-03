@@ -37,6 +37,6 @@
             </VBox>
          </items>
       </ToolBar>
-      <Pane fx:id="mainPane" prefHeight="766.0" prefWidth="800.0" />
+      <Pane fx:id="mainPane" prefHeight="732.0" prefWidth="800.0" />
    </children>
 </VBox>

@@ -40,7 +40,6 @@ public class MP3Player {
 //	- mp3.framerate.fps : [Float], framerate in frames per seconds. 
 	private Map<String, Object> properties;
 	private int currentSeconds;
-	private int currentFrame;
 	private int frameBytesUnit;
 
 	private Thread thread; 				// 음악 재생용 쓰레드 
@@ -48,6 +47,7 @@ public class MP3Player {
 	private AudioInputStream in;		// 선택된 mp3 파일의 디코딩 전 원본 스트림 
 	private AudioFormat decodedFormat;
 	
+	private byte[] allBytes;
 	private AudioInputStream din;		// 선택된 mp3 파일의 디코딩 후 스트림 
 	
 	private boolean isRunning;
@@ -56,7 +56,7 @@ public class MP3Player {
 	private MP3Player () {
 		properties = new HashMap<String, Object>();
 		currentSeconds = 0;
-		isRunning = true;
+		isRunning = false;
 		isDragging = false;
 	}
 	
@@ -82,6 +82,7 @@ public class MP3Player {
 				file = new File(fileName);
 				
 				setNewDecodedInputStream();
+				
 				// blocking method
 				rawplay();
 				System.out.println("play try call before in.close()");
@@ -95,6 +96,7 @@ public class MP3Player {
 		});
 		
 		thread.start();
+		
 //		thread.setName("mp3 play thread");
 		System.out.println(thread.getName());
 	}
@@ -112,6 +114,17 @@ public class MP3Player {
 	
 	private synchronized void rawplay() throws IOException, LineUnavailableException {
 		frameBytesUnit = (Integer)properties.get("mp3.framesize.bytes");
+		allBytes = din.readAllBytes();
+		System.out.print("allBytes Length : ");
+		System.out.println(allBytes.length);
+		isRunning = true;
+		
+		try {
+			setNewDecodedInputStream();
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		
 		byte[] data = new byte[frameBytesUnit];
 		SourceDataLine line = getLine((AudioFormat)decodedFormat);
 		// blocking
@@ -175,6 +188,14 @@ public class MP3Player {
 					if (!Main.rootController.getMusicLength().isPressed())
 						Main.rootController.setMusicLengthValue(getCurrentSeconds());
 				}
+				
+//				for (int i = 0; i < data.length; ++i) {
+//					System.out.print(data[i]);
+//					System.out.print(" ");
+//				}
+//				System.out.println();
+//				System.out.println();
+				
 				if (nBytesRead != -1) {
 					nBytesWritten = line.write(data,  0, nBytesRead);
 //					System.out.println(nBytesWritten);
@@ -247,10 +268,6 @@ public class MP3Player {
 		currentSeconds = s;
 	}
 	
-	public void setCurrentFrame(int frame) {
-		currentFrame = frame;
-	}
-	
 	public int getMaxLengthOfFrames() {
 		return (int)properties.get("mp3.length.frames");
 	}
@@ -261,6 +278,10 @@ public class MP3Player {
 	
 	public int calcFrameFromSeconds(int s) {
 		return (int)(s * (double)getMaxLengthOfFrames() / (double)getDurationInSeconds());
+	}
+	
+	public boolean getIsRunning() {
+		return isRunning;
 	}
 	
 	public static MP3Player getInstance() {
@@ -277,5 +298,13 @@ public class MP3Player {
 	
 	public long secondsToBytes() {
 		return frameBytesUnit*currentSeconds;
+	}
+	
+	public byte[] getAllBytes() {
+		return allBytes;
+	}
+	
+	public int getFrameBytesUnit() {
+		return frameBytesUnit;
 	}
 }
