@@ -12,17 +12,16 @@ import javafx.fxml.FXML;
 import javafx.fxml.Initializable;
 import javafx.geometry.Insets;
 import javafx.scene.control.Button;
-import javafx.scene.control.CheckMenuItem;
-import javafx.scene.control.ComboBox;
 import javafx.scene.control.Control;
 import javafx.scene.control.Menu;
 import javafx.scene.control.Slider;
 import javafx.scene.layout.Background;
 import javafx.scene.layout.BackgroundFill;
 import javafx.scene.layout.CornerRadii;
-import javafx.scene.layout.TilePane;
+import javafx.scene.layout.Pane;
 import javafx.scene.layout.VBox;
 import javafx.scene.paint.Color;
+import javafx.scene.text.Text;
 import javafx.stage.FileChooser;
 import javafx.stage.FileChooser.ExtensionFilter;
 import javafx.stage.Stage;
@@ -35,16 +34,20 @@ public class RootController implements Initializable {
 	 * 		- Menu(menuTrack)
 	 *  - ToolBar
 	 *  	- Button(btnPlayOnOff)
-	 *  	- Slider(sliderLaunchpadSize)
+	 *  	- Slider(musicLength)
+	 *  - Pane
 	 */
 	private Stage stage;
 	
 	@FXML private VBox root;
 	@FXML private Menu menuTrack;
-	@FXML private TilePane mainPane;
+	@FXML private Pane mainPane;
 	
 	@FXML private Button btnPlayOnOff;
-	@FXML private Slider sliderLaunchpadSize;
+	@FXML private Slider musicLength;
+	@FXML private Text timeDisplay;
+	
+	private StringBuilder sbForTimeDisplay = new StringBuilder();
 	
 	@Override
 	public void initialize(URL location, ResourceBundle resources) {
@@ -52,10 +55,10 @@ public class RootController implements Initializable {
 		
 		mainPane.setBackground(new Background(new BackgroundFill(Color.web("#000000"), CornerRadii.EMPTY, Insets.EMPTY)));
 		
-		sliderLaunchpadSize.valueProperty().addListener(new ChangeListener<Number>() {
+		musicLength.valueProperty().addListener(new ChangeListener<Number>() {
 			@Override
 			public void changed(ObservableValue<? extends Number> Observable, Number oldValue, Number newValue) {
-				
+//				System.out.println("changed");
 			}
 		});
 	}
@@ -64,9 +67,6 @@ public class RootController implements Initializable {
 		mainPane.getChildren().clear();
 		root.setPrefSize(Control.BASELINE_OFFSET_SAME_AS_HEIGHT, Control.BASELINE_OFFSET_SAME_AS_HEIGHT);
 		mainPane.setPrefSize(root.getWidth(), root.getHeight());
-		double prefTileSize = mainPane.getPrefWidth()/column; 
-		mainPane.setPrefTileWidth(prefTileSize);
-		mainPane.setPrefTileHeight(prefTileSize);
 	}
 	
 	@FXML
@@ -93,11 +93,51 @@ public class RootController implements Initializable {
 		MP3Player.getInstance().toggle();
 	}
 	
-	public TilePane getMainPane() {
+	@FXML
+	public void handleMusicLengthDetected() {
+//		System.out.println("detected");
+		MP3Player.getInstance().setIsDragging(true);
+	}
+	
+	@FXML
+	public void handleMusicLengthDragged() {
+//		System.out.println("dragged");
+		MP3Player.getInstance().setIsDragging(true);
+		MP3Player.getInstance().setCurrentSeconds((int)musicLength.getValue());
+	}
+	
+	@FXML
+	public void handleMusicLengthReleased() {
+//		System.out.println("released");
+		MP3Player.getInstance().setCurrentSeconds((int)musicLength.getValue());
+		MP3Player.getInstance().setIsDragging(false);
+	}
+	
+	public Pane getMainPane() {
 		return mainPane;
 	}
 	
 	public void setStage(Stage stage) {
 		this.stage = stage;
+	}
+	
+	public Slider getMusicLength() {
+		return musicLength;
+	}
+	
+	public void setMusicLengthValue(int seconds) {
+		musicLength.setValue(seconds);
+	}
+	
+	public void setMusicMaxLength(int seconds) {
+		musicLength.setMax(seconds);
+	}
+	
+	public void setTimeDisplay(int seconds) {
+		sbForTimeDisplay.append(seconds/60);
+		sbForTimeDisplay.append(":");
+		sbForTimeDisplay.append(seconds%60);
+		timeDisplay.setText(sbForTimeDisplay.toString());
+		sbForTimeDisplay.delete(0, sbForTimeDisplay.length());
 	}
 }

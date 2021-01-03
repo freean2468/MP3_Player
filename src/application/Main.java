@@ -8,12 +8,14 @@ import javafx.scene.Scene;
 
 
 public class Main extends Application {
+	public static RootController rootController;
+	
 	@Override
 	public void start(Stage primaryStage) {
 		try {
 			FXMLLoader fxmlLoader = new FXMLLoader(getClass().getResource("../root.fxml"));
 			Parent root = fxmlLoader.load();
-			RootController rootController = (RootController) fxmlLoader.getController();
+			rootController = (RootController) fxmlLoader.getController();
 			rootController.setStage(primaryStage);
 			
 			Scene scene = new Scene(root);
@@ -21,7 +23,7 @@ public class Main extends Application {
 			primaryStage.setScene(scene);
 			primaryStage.show();
 			
-			System.out.println(Thread.currentThread().getName());
+//			System.out.println(Thread.currentThread().getName());
 		} catch(Exception e) {
 			e.printStackTrace();
 		}
@@ -34,7 +36,7 @@ public class Main extends Application {
 	}
 	
 	public static void main(String[] args) {
-		System.out.println(Thread.currentThread().getName());
+//		System.out.println(Thread.currentThread().getName());
 		launch(args);
 	}
 }

@@ -1,5 +1,6 @@
 package application;
 
+import java.io.EOFException;
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
@@ -39,60 +40,57 @@ public class MP3Player {
 //	- mp3.framerate.fps : [Float], framerate in frames per seconds. 
 	private Map<String, Object> properties;
 	private int currentSeconds;
-	private long currentBytes;
+	private int currentFrame;
+	private int frameBytesUnit;
 
-	private Thread thread; 				// 음악 재생용 쓰레드
-	private File file;					// 선택된 mp3 파일 
+	private Thread thread; 				// 음악 재생용 쓰레드 
+	private File file;
 	private AudioInputStream in;		// 선택된 mp3 파일의 디코딩 전 원본 스트림 
+	private AudioFormat decodedFormat;
+	
+	private AudioInputStream din;		// 선택된 mp3 파일의 디코딩 후 스트림 
 	
 	private boolean isRunning;
+	private boolean isDragging;
 	
 	private MP3Player () {
 		properties = new HashMap<String, Object>();
 		currentSeconds = 0;
-		currentBytes = 0;
 		isRunning = true;
+		isDragging = false;
 	}
 	
 	public void toggle() {
-		if (isRunning == false) {
-			try {
-				synchronized(thread) {
-					System.out.println(Thread.currentThread().getName() + " calling thread.notify");
-					thread.notify();
+		if (thread != null && thread.isAlive()) {
+			if (isRunning == false) {
+				try {
+					synchronized(thread) {
+						System.out.println(Thread.currentThread().getName() + " calling thread.notify");
+						thread.notify();
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
 				}
-			} catch (Exception e) {
-				e.printStackTrace();
 			}
+			isRunning = !isRunning;
 		}
-		isRunning = !isRunning;
 	}
 	
 	public void play(String fileName) {
 		thread = new Thread(() -> {
 			try {
 				file = new File(fileName);
-				in = AudioSystem.getAudioInputStream(file);
-				AudioInputStream din = null;
-				AudioFormat baseFormat = in.getFormat();
-				AudioFormat decodedFormat = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED,
-															baseFormat.getSampleRate(),
-															16,
-															baseFormat.getChannels(),
-															baseFormat.getChannels() * 2,
-															baseFormat.getSampleRate(),
-															false);
-				setProperties(file);
-				din = AudioSystem.getAudioInputStream(decodedFormat, in);
+				
+				setNewDecodedInputStream();
 				// blocking method
-				rawplay(decodedFormat, din);
+				rawplay();
 				System.out.println("play try call before in.close()");
-				in.close();
 			} catch (Exception e) {
 				System.out.println(e.getMessage());
 				e.printStackTrace();
 			} finally {
 				System.out.println("play finally call");
+				init();
 			}
 		});
 		
@@ -101,10 +99,21 @@ public class MP3Player {
 		System.out.println(thread.getName());
 	}
 	
-	private synchronized void rawplay(AudioFormat targetFormat, AudioInputStream din) throws IOException, LineUnavailableException {
-		byte[] data = new byte[(Integer)properties.get("mp3.framesize.bytes")];
-		SourceDataLine line = getLine(targetFormat);
-		int sum = 0;
+	public void init() {
+		try {
+			din.close();
+			in.close();
+			Main.rootController.setTimeDisplay(0);
+			Main.rootController.setMusicLengthValue(0);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	private synchronized void rawplay() throws IOException, LineUnavailableException {
+		frameBytesUnit = (Integer)properties.get("mp3.framesize.bytes");
+		byte[] data = new byte[frameBytesUnit];
+		SourceDataLine line = getLine((AudioFormat)decodedFormat);
 		// blocking
 		if (line != null) {
 			// start
@@ -116,15 +125,43 @@ public class MP3Player {
 						synchronized (thread) {
 							System.out.println(thread.getName() + " calling thread.wait!");
 							// Thread의 wait 함수는 불리는 개체에 상관 없이 '현재' 스레드를 중지시킨다.
-							// 즉 wait() 함수는 작업이 중지될 그 지점에서 호출되어야지,
-							// 다른 thread로부터 불릴 수는 없다.
+							// 즉 wait() 함수는 작업이 중지될 그 지점에서 호출되어야지, 다른 thread가 직접 호출할 수는 없다. (그 thread가 멈추게 된다.)
 							thread.wait();
 						}
 					} catch (InterruptedException e) {
 						Thread.currentThread().interrupt(); 
 		                System.out.println("Thread interrupted"); 
-					} catch (Exception e) {
-						System.out.println(thread.getName());
+					}
+				}
+				while (isDragging) {
+					try {
+						synchronized (thread) {
+							thread.sleep(500);
+							isDragging = false;
+							if (din instanceof DecodedMpegAudioInputStream) {
+								try {
+									int offset = 0;
+									line.drain();
+									line.stop();
+									line.close();
+									setNewDecodedInputStream();
+									line = getLine((AudioFormat)decodedFormat);
+									line.start();
+//									System.out.println(currentSeconds);
+									offset = (int)((DecodedMpegAudioInputStream)din).skipFrames(calcFrameFromSeconds(currentSeconds));
+//									System.out.println(offset);
+									din.read(din.readNBytes(offset), 0, offset);
+								} catch (EOFException e) {
+									e.printStackTrace();
+								} catch (IOException e) {
+									e.printStackTrace();
+								} catch (UnsupportedAudioFileException e) {
+									// TODO Auto-generated catch block
+									e.printStackTrace();
+								}
+							}
+						}
+					} catch (InterruptedException e) {
 						e.printStackTrace();
 					}
 				}
@@ -133,21 +170,23 @@ public class MP3Player {
 				if (din instanceof DecodedMpegAudioInputStream) {
 					Map<String, Object> property = ((DecodedMpegAudioInputStream) din).properties();
 //					System.out.println(property);
-					setCurrentSeconds(getCurrentSeconds((Long)property.get("mp3.position.microseconds")));
-					setCurrentBytes((Long)property.get("mp3.position.byte"));
+					setCurrentSeconds(toSeconds((Long)property.get("mp3.position.microseconds")));
+					Main.rootController.setTimeDisplay(getCurrentSeconds());
+					if (!Main.rootController.getMusicLength().isPressed())
+						Main.rootController.setMusicLengthValue(getCurrentSeconds());
 				}
-				if (nBytesRead != -1) nBytesWritten = line.write(data,  0, nBytesRead);
-				sum += nBytesWritten;
+				if (nBytesRead != -1) {
+					nBytesWritten = line.write(data,  0, nBytesRead);
+//					System.out.println(nBytesWritten);
+				}
 			}
 		}
 		System.out.println(this.properties);
-		System.out.println(sum);
 		
 		// Stop
 		line.drain();
 		line.stop();
 		line.close();
-		din.close();
 	}
 	
 	private SourceDataLine getLine(AudioFormat audioFormat) throws LineUnavailableException {
@@ -165,8 +204,11 @@ public class MP3Player {
 		if (baseFileFormat instanceof TAudioFileFormat) {
 //			System.out.println("TAudioFileFormat");
 			Map<String, Object> properties = ((TAudioFileFormat)baseFileFormat).properties();
-//			System.out.println(properties);
+			System.out.println(properties);
 			this.properties.putAll(properties);
+			
+			// 재생 총 길이 
+			Main.rootController.setMusicMaxLength(getDurationInSeconds());
 		}
 		
 		if (baseFormat instanceof TAudioFormat) {
@@ -177,23 +219,63 @@ public class MP3Player {
 //		System.out.println(this.properties);
 	}
 	
-	public int getCurrentSeconds(long microSeconds) {
-		return (int)(microSeconds / 1000000 % 60);
+	private void setNewDecodedInputStream() throws IOException, UnsupportedAudioFileException {
+		if (din != null) {
+//			din.close();
+		}
+		in = AudioSystem.getAudioInputStream(file);
+		setProperties(file);
+		decodedFormat = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED,
+				in.getFormat().getSampleRate(),
+				16,
+				in.getFormat().getChannels(),
+				in.getFormat().getChannels() * 2,
+				in.getFormat().getSampleRate(),
+				false);
+		din = AudioSystem.getAudioInputStream(decodedFormat, in);
 	}
 	
-	private void setCurrentSeconds(int s) {
+	public int toSeconds(long microSeconds) {
+		return (int)(microSeconds / 1000000);
+	}
+	
+	public int getCurrentSeconds() {
+		return currentSeconds;
+	}
+	
+	public void setCurrentSeconds(int s) {
 		currentSeconds = s;
 	}
 	
-	public long getCurrentBytes() {
-		return currentBytes;
+	public void setCurrentFrame(int frame) {
+		currentFrame = frame;
 	}
 	
-	private void setCurrentBytes(long bytes) {
-		currentBytes = bytes;
+	public int getMaxLengthOfFrames() {
+		return (int)properties.get("mp3.length.frames");
+	}
+	
+	public int getDurationInSeconds() {
+		return toSeconds(((long)properties.get("duration")));
+	}
+	
+	public int calcFrameFromSeconds(int s) {
+		return (int)(s * (double)getMaxLengthOfFrames() / (double)getDurationInSeconds());
 	}
 	
 	public static MP3Player getInstance() {
 		return singleton;
+	}
+	
+	public boolean getIsDragging() {
+		return isDragging;
+	}
+	
+	public void setIsDragging(boolean dragging) {
+		isDragging = dragging;
+	}
+	
+	public long secondsToBytes() {
+		return frameBytesUnit*currentSeconds;
 	}
 }
